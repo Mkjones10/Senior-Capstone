@@ -1,66 +1,41 @@
-# Python code for Multiple Color Detection
+from scapy.all import sniff, IP, TCP
+import time
 
-import numpy as np
-import cv2
+# Dictionary to track IPs sending SYN packets (used in port scanning detection)
+syn_packet_count = {}
 
-# Capturing video through webcam
-webcam = cv2.VideoCapture(0)
+# Function to analyze packets
+def analyze_packet(packet):
+    if packet.haslayer(IP):
+        ip_src = packet[IP].src
+        ip_dst = packet[IP].dst
+        packet_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(packet.time))
+        
+        # Detecting SYN scan (common in port scans)
+        if packet.haslayer(TCP) and packet[TCP].flags == 'S':  # SYN flag set
+            if ip_src in syn_packet_count:
+                syn_packet_count[ip_src] += 1
+            else:
+                syn_packet_count[ip_src] = 1
+            
+            if syn_packet_count[ip_src] > 10:  # Threshold for SYN flood or scan detection
+                print(f"[ALERT] Possible Port Scan Detected from {ip_src} at {packet_time}")
+                log_alert(f"Port scan from {ip_src} to {ip_dst} at {packet_time}")
+        
+        # Example of detecting unusually large packets
+        if len(packet) > 1500:
+            print(f"[ALERT] Large packet detected from {ip_src} to {ip_dst} at {packet_time}")
+            log_alert(f"Large packet from {ip_src} to {ip_dst} at {packet_time}")
 
-# Define color ranges and masks
-color_ranges = {
-    "Red": ([136, 87, 111], [180, 255, 255], (0, 0, 255)),
-    "Green": ([25, 52, 72], [102, 255, 255], (0, 255, 0)),
-    "Blue": ([94, 80, 2], [120, 255, 255], (255, 0, 0)),
-    "Yellow": ([22, 93, 0], [45, 255, 255], (0, 255, 255)),
-    "Orange": ([10, 100, 20], [25, 255, 255], (0, 165, 255)),
-    "Purple": ([125, 50, 50], [150, 255, 255], (128, 0, 128)),
-    "White": ([0, 0, 168], [172, 111, 255], (255, 255, 255)),
-    "Black": ([0, 0, 0], [180, 255, 30], (0, 0, 0)),
-}
+# Function to log alerts to a file
+def log_alert(message):
+    with open("intrusion_log.txt", "a") as log_file:
+        log_file.write(f"{message}\n")
 
-# List of colors for cycling through them
-colors = list(color_ranges.keys())
-current_color_index = 0
+# Sniffing packets and applying analysis
+def start_sniffing():
+    print("Starting packet sniffing...")
+    sniff(prn=analyze_packet, store=False, filter="ip")
 
-# Start a while loop
-while True:
-    
-    # Reading the video from the webcam in image frames
-    _, imageFrame = webcam.read()
-    
-    # Convert the imageFrame in BGR (RGB color space) to HSV (hue-saturation-value) color space
-    hsvFrame = cv2.cvtColor(imageFrame, cv2.COLOR_BGR2HSV)
-    
-    # Get the current color details
-    current_color_name = colors[current_color_index]
-    lower, upper, color = color_ranges[current_color_name]
-    lower_np = np.array(lower, np.uint8)
-    upper_np = np.array(upper, np.uint8)
-    mask = cv2.inRange(hsvFrame, lower_np, upper_np)
-    
-    # Morphological Transform, Dilation
-    kernel = np.ones((5, 5), "uint8")
-    mask = cv2.dilate(mask, kernel)
-    res = cv2.bitwise_and(imageFrame, imageFrame, mask=mask)
-    
-    # Creating contour to track the color
-    contours, hierarchy = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    
-    for pic, contour in enumerate(contours):
-        area = cv2.contourArea(contour)
-        if area > 300:
-            x, y, w, h = cv2.boundingRect(contour)
-            imageFrame = cv2.rectangle(imageFrame, (x, y), (x + w, y + h), color, 2)
-            cv2.putText(imageFrame, f"{current_color_name} Colour", (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color)
-    
-    # Program Termination
-    cv2.imshow("Color Detection in Real-Time", imageFrame)
-    
-    key = cv2.waitKey(10) & 0xFF
-    if key == ord('q'):
-        break
-    elif key == ord('n'):
-        current_color_index = (current_color_index + 1) % len(colors)
-
-webcam.release()
-cv2.destroyAllWindows()
+if __name__ == "__main__":
+    start_sniffing()
